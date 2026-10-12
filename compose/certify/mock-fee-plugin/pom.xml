@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+compose/certify/mock-fee-plugin/pom.xml
+
+Dependencias necesarias para que MockFeeDataProviderPlugin implemente la
+interfaz SPI real y Spring detecte el bean (sin ellas Certify falla con "No
+qualifying bean of type io.mosip.certify.api.spi.DataProviderPlugin
+available"). Versiones confirmadas por inspección directa del JAR de la
+imagen (`docker cp` de certify-service.jar + `jar tf` sobre BOOT-INF/lib/):
+
+  - org.json:json 20241224 — JSONObject/JSONArray, tipo de retorno de
+    DataProviderPlugin#fetchData. Certify ya trae org.json en BOOT-INF/lib/,
+    así que es solo de COMPILACIÓN (sin shade); se deja scope 'compile' y no
+    'provided' porque PropertiesLauncher combina additional_jars con el
+    classpath de la app, y con la misma versión no hay clases duplicadas.
+  - io.inji.certify:certify-integration-api:0.14.0 (system-scope) — la
+    interfaz DataProviderPlugin real, extraída de la imagen
+    injistack/inji-certify-with-plugins:0.14.0. No está en Maven Central, así
+    que se referencia por <systemPath> al archivo versionado en lib/. El
+    paquete Java es io.mosip.certify.api.spi.*, pero el groupId Maven real
+    (META-INF/maven/.../pom.xml del JAR) es io.inji.certify; al ser
+    system-scope solo funciona como etiqueta local.
+  - org.springframework:spring-context 6.1.4 — solo para @Component (descubrimiento
+    por component-scan junto con
+    mosip.certify.integration.scan-base-package=pe.gob.mtc.mock). Versión
+    tomada de BOOT-INF/lib/spring-context-6.1.4.jar en la imagen.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>pe.gob.mtc.mock</groupId>
+  <artifactId>mock-fee-plugin</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+  <properties>
+    <!-- certify-integration-api-0.14.0.jar (lib/) está compilado con class
+         file version 65.0 = Java 21; con release 17 mvn falla con "class file
+         has wrong version 65.0, should be 61.0". 21 es el mínimo que
+         satisface ese JAR. -->
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.json</groupId>
+      <artifactId>json</artifactId>
+      <version>20241224</version>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-context</artifactId>
+      <version>6.1.4</version>
+    </dependency>
+    <dependency>
+      <groupId>io.inji.certify</groupId>
+      <artifactId>certify-integration-api</artifactId>
+      <version>0.14.0</version>
+      <scope>system</scope>
+      <systemPath>${project.basedir}/lib/certify-integration-api-0.14.0.jar</systemPath>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.10.2</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.2.5</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>

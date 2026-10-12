@@ -1,0 +1,103 @@
+# compose/docker-compose.yml
+#
+# Entorno aislado y reproducible de la PoC mDL del MTC: PostgreSQL + Inji
+# Certify 0.14.0 (con el plugin MockFeeDataProviderPlugin) + nginx.
+# Adaptado del proyecto de código abierto `verifiably` (servicios
+# inji-certify-preauth*), sin Caddy ni proxy intermedio.
+#
+# nginx termina HTTPS (https://localhost:8094) porque io.mosip.vciclient, el
+# parser de credential offers de inji-wallet, rechaza cualquier
+# credential_issuer que no empiece con "https://", aunque Android permita
+# cleartext en localhost. Por eso mosip_certify_domain_url usa https.
+# El certificado autofirmado (certify-nginx/certs/localhost-{cert,key}.pem,
+# no versionado) se genera con: compose/scripts/gen-dev-cert.sh
+# Un cert autofirmado no es confiable por defecto en el wallet: hay que
+# instalarlo como CA de usuario o declararlo en su network_security_config.
+#
+# Orden de init scripts: init-preauth.sql crea el schema base de Certify e
+# init-mdoc.sql inserta sobre él, por eso el 01 debe ir antes del 02.
+#
+# NO cubre: CloudHSM real, certificado de la CA del MTC, IACA/trust
+# anchors reales — ver IMPLEMENTATION.md.
+
+services:
+  certify-postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: inji_certify
+    volumes:
+      - ./certify/init-preauth.sql:/docker-entrypoint-initdb.d/01-init-preauth.sql:ro
+      - ./certify/init-mdoc.sql:/docker-entrypoint-initdb.d/02-init-mdoc.sql:ro
+      - certify-db:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5436:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+
+  certify:
+    image: injistack/inji-certify-with-plugins:0.14.0
+    restart: unless-stopped
+    user: root
+    environment:
+      - container_user=mosip
+      - active_profile_env=default,mtc-mock-fee
+      - SPRING_CONFIG_NAME=certify
+      - SPRING_CONFIG_LOCATION=/home/mosip/config/
+      - enable_certify_artifactory=false
+      - download_hsm_client=false
+      - CERTIFY_ISSUER_DID=did:web:certify-nginx
+      - ISSUER_DISPLAY_NAME=MTC PoC mDL (entorno de pruebas)
+      - mosip_certify_domain_url=https://localhost:8094
+      - MOSIP_CERTIFY_AUTHN_JWK_SET_URI=http://certify:8090/v1/certify/.well-known/jwks.json
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://certify-postgres:5432/inji_certify
+      - SPRING_DATASOURCE_USERNAME=postgres
+      - SPRING_DATASOURCE_PASSWORD=postgres
+    volumes:
+      - ./certify/certify-default.properties:/home/mosip/config/certify-default.properties:ro
+      - ./certify/certify-mtc-mock-fee.properties:/home/mosip/config/certify-mtc-mock-fee.properties:ro
+      # Parche de bytecode (javassist, ver certify/patched-jars/README.md) para
+      # un bug de Certify 0.14.0: MDocProcessor.createDeviceKeyInfo() no recorta
+      # el fragmento DID URL (#0) del holder key antes de decodificar en
+      # base64url (DIDjwkProofManager sí lo hace), y falla con "Illegal base64
+      # character" con kid "did:jwk:<b64url>#0" y proof_type=jwt+kid. El parche
+      # añade split("#")[0] antes de cada decode. Workaround temporal hasta que
+      # el fix llegue a mosip/inji-certify.
+      - ./certify/patched-jars/certify-service-patched.jar:/home/inji/certify-service.jar:ro
+      # La imagen arranca Java con -Dloader.path=/home/inji/additional_jars/
+      # (confirmado con `docker inspect`); el PropertiesLauncher de Spring Boot
+      # solo escanea esa ruta, y sin el JAR el arranque falla con "No
+      # qualifying bean of type io.mosip.certify.api.spi.DataProviderPlugin".
+      - ./certify/mock-fee-plugin/target/mock-fee-plugin-1.0.0.jar:/home/inji/additional_jars/mock-fee-plugin-1.0.0.jar:ro
+      - certify-pkcs12:/home/inji/CERTIFY_PKCS12
+    depends_on:
+      certify-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8090/v1/certify/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      start_period: 120s
+      retries: 10
+
+  certify-nginx:
+    image: nginx:1.27
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:80"
+      - "127.0.0.1:8094:443"
+    volumes:
+      - ./certify-nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certify-nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - certify
+
+volumes:
+  certify-db:
+  certify-pkcs12:

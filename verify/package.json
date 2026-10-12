@@ -1,0 +1,10 @@
+{
+  "name": "mtc-mdl-poc-verify",
+  "private": true,
+  "type": "module",
+  "description": "Verificador standalone de mdocs para la PoC mDL del MTC — adaptado del proyecto de código abierto `verifiably`.",
+  "dependencies": {
+    "@owf/cose": "^0.3.0",
+    "@owf/mdoc": "^0.7.0"
+  }
+}

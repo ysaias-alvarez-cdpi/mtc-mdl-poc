@@ -1,0 +1,9 @@
+compose/certify-nginx/certs/*.crt
+compose/certify-nginx/certs/*.key
+compose/certify/mock-fee-plugin/target/
+node_modules/
+*.log
+.worktrees/
+compose/certify-nginx/certs/*.pem
+
+Veredicto_mDL_MTC*.docx
